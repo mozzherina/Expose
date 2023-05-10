@@ -8,10 +8,9 @@ The server is running [here](https://expose.eng.unibz.it/health).
 If you are interested to know more, feel free to open an issue to provide feedback on the project or reach our team members for more specific cases:
 
 * [Elena Romanenko](https://github.com/mozzherina)
-* [Konstantin Romanenko](https://github.com/astricus)
 * [Diego Calvanese](http://www.inf.unibz.it/~calvanese/)
 * [Giancarlo Guizzardi](https://people.utwente.nl/g.guizzardi)
-
+* [Konstantin Romanenko](https://github.com/astricus)
 ___
 
 ## Endpoints
