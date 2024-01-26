@@ -240,6 +240,5 @@ ___
 Please, refer to the [PURL](https://w3id.org/ExpO/expose) and
 cite the paper: 
 
-Romanenko, E., Calvanese, D., Guizzardi, G.: ExpO: A Framework for Explaining
-Ontology-Driven Conceptual Models. (2023) _Manuscript submitted for publication._
+Romanenko, E., Calvanese, D., Guizzardi, G.: ExpO: An Approach Towards Explaining Ontology-Driven Conceptual Models. (2024) _Manuscript submitted for publication._
 
