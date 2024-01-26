@@ -1,7 +1,7 @@
-# ExpO Framework
+# ExpO: Towards Explaining Ontology-Driven Conceptual Models
 
-## Expose: ExpO REST API Server
-An API service for performing transformation operations over Ontology Driven Conceptual Models.
+## Expose: ExpO server
+An API service for performing transformation operations over Ontology-Driven Conceptual Models.
 
 The public server is running [here](https://expose.eng.unibz.it/health).
 
