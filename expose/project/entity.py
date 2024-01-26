@@ -58,8 +58,8 @@ class Entity(Element):
             "fullName": f"{self._stereotype}:{self._name}" if self._stereotype else self._name,
             "color": self._set_colour(),
             "symbolType": self._set_symbol_type(),
-            "x": self.views[0].get_x(),
-            "y": self.views[0].get_y()
+            "x": self.views[0].get_x() if self.views else 0,
+            "y": self.views[0].get_y() if self.views else 0
         }
 
     def _set_colour(self) -> str:
@@ -67,28 +67,43 @@ class Entity(Element):
         Sets colour for the Entity
         :return: colour in hex format
         """
+        colour = GRAPH_BASIC_COLOUR
+
+        if self._rest["restrictedTo"]:
+            if self._rest["restrictedTo"][0] == "relator":
+                colour = GRAPH_RELATOR_COLOUR
+            elif self._rest["restrictedTo"][0] == "event":
+                colour = GRAPH_EVENT_COLOUR
+            elif self._rest["restrictedTo"][0] == "functional-complex":
+                colour = GRAPH_OBJECT_COLOUR
+            elif self._rest["restrictedTo"][0] == "intrinsic-mode":
+                colour = GRAPH_MODE_COLOUR
+
         if self._stereotype == ClassStereotype.RELATOR.value:
-            return GRAPH_RELATOR_COLOUR
+            colour = GRAPH_RELATOR_COLOUR
         elif self._stereotype == ClassStereotype.QUALITY.value \
                 or self._stereotype == ClassStereotype.MODE.value:
-            return GRAPH_MODE_COLOUR
+            colour = GRAPH_MODE_COLOUR
         elif self._stereotype == ClassStereotype.ENUMERATION.value \
                 or self._stereotype == ClassStereotype.DATATYPE.value \
                 or self._stereotype == ClassStereotype.ABSTRACT.value:
-            return GRAPH_ENUMERATION_COLOUR
+            colour = GRAPH_ENUMERATION_COLOUR
         elif self._stereotype == ClassStereotype.EVENT.value \
                 or self._stereotype == ClassStereotype.SITUATION.value:
-            return GRAPH_EVENT_COLOUR
-        elif self._stereotype == ClassStereotype.ROLE.value \
-                or self._stereotype == ClassStereotype.PHASE.value \
-                or self._stereotype == ClassStereotype.KIND.value \
-                or self._stereotype == ClassStereotype.SUBKIND.value \
+            colour = GRAPH_EVENT_COLOUR
+        elif self._stereotype == ClassStereotype.KIND.value \
                 or self._stereotype == ClassStereotype.CATEGORY.value \
                 or self._stereotype == ClassStereotype.QUANTITY.value \
                 or self._stereotype == ClassStereotype.COLLECTIVE.value:
-            return GRAPH_OBJECT_COLOUR
+            colour = GRAPH_OBJECT_COLOUR
+        elif self._stereotype == ClassStereotype.ROLE.value \
+                or self._stereotype == ClassStereotype.PHASE.value \
+                or self._stereotype == ClassStereotype.SUBKIND.value:
+            colour = color_variant(colour, GRAPH_COLOUR_VARIATION)
         else:
-            return GRAPH_BASIC_COLOUR
+            colour = GRAPH_BASIC_COLOUR
+
+        return colour
 
     def _set_symbol_type(self) -> str:
         """

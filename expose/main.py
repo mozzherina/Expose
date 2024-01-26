@@ -145,7 +145,7 @@ def load_from_url(url: str, in_format: str):
 
     try:
         if in_format == "json":
-            return requests.get(url, allow_redirects=True).json()
+            return requests.get(url.strip(), allow_redirects=True).json()
         else:
             # TODO: upload of ttl files
             raise NotImplementedError

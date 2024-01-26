@@ -176,3 +176,10 @@ def generate_id(length: int = ID_LENGTH) -> str:
     Generates ids for new Elements
     """
     return "".join([random.choice(string.ascii_letters + string.digits) for _ in range(length)])
+
+
+def color_variant(hex_color, brightness_offset=1) -> str:
+    rgb_hex = [hex_color[x:x+2] for x in [1, 3, 5]]
+    new_rgb_int = [int(hex_value, 16) + brightness_offset for hex_value in rgb_hex]
+    new_rgb_int = [min([255, max([0, i])]) for i in new_rgb_int]
+    return "#" + "".join([hex(i)[2:] for i in new_rgb_int]).upper()

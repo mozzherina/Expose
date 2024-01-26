@@ -316,11 +316,36 @@ class JSONGraph(BaseGraph, Element):
         if self._relation_ids:
             for relation in self._relation_ids.values():
                 result["graph"]["links"].append(relation.to_expo())
+        result["graph"]["links"] = self._expo_links_postprocessing(result["graph"]["links"])
 
         for generalization_set in self._generalization_set_ids.values():
             result["constraints"].append(generalization_set.to_expo())
 
         return result
+
+    @staticmethod
+    def _expo_links_postprocessing(links: list) -> list:
+        """
+        Postprocessing of the links for the Expo format
+        so that multiple links between nodes are displayed correctly
+        """
+        connections = {}
+        double_links = {}
+        for link in links:
+            if link["source"]+link["target"] not in connections:
+                if link["target"]+link["source"] not in connections:
+                    connections[link["source"]+link["target"]] = link
+                else:
+                    connections[link["target"] + link["source"]]["name"] += " | " + link["name"]
+                    connections[link["target"] + link["source"]]["fullName"] += " | " + link["fullName"]
+                    if link["target"] + link["source"] not in double_links:
+                        double_links[link["target"] + link["source"]] = link
+                        double_links[link["target"] + link["source"]]["name"] = ""
+                        double_links[link["target"] + link["source"]]["fullName"] = ""
+            else:
+                connections[link["source"]+link["target"]]["name"] += " | " + link["name"]
+                connections[link["source"]+link["target"]]["fullName"] += " | " + link["fullName"]
+        return list(connections.values()) + list(double_links.values())
 
     def __str__(self):
         result = "\n----------------------------------------------------------------------"
@@ -470,8 +495,9 @@ class JSONGraph(BaseGraph, Element):
         target = self._entity_ids[enumeration_id]
 
         # create view for Enumeration
-        enumeration_view = View.create_entity_view(enumeration_id,
-                                                   diagram_id,
+        enumeration_view = View.create_entity_view(enumeration_id, diagram_id,
+                                                   x=source.get_view(diagram_id).get_x() + DEFAULT_WIDTH + 50,
+                                                   y=source.get_view(diagram_id).get_y() + DEFAULT_HEIGHT + 50,
                                                    height=DEFAULT_HEIGHT + len(literals) * ATTRIBUTE_HEIGHT)
         self._entity_ids[enumeration_id].add_view(enumeration_view)
         self._diagrams[diagram_id].add_element(enumeration_view)
@@ -536,13 +562,15 @@ class JSONGraph(BaseGraph, Element):
         """
         if node not in self._entity_ids:
             raise ValueError(f"Concept with id='{node}' does not exist")
-        if self._entity_ids[node].stereotype != ClassStereotype.RELATOR.value:
-            raise ValueError(f"Concept with id='{node}' is not a RELATOR")
 
-        cluster_nodes = self._get_cluster_nodes(node)
-        other_nodes = self._entity_ids.keys() - cluster_nodes
-        for node in other_nodes:
-            self.delete_entity(node)
+        if self._entity_ids[node].stereotype != ClassStereotype.RELATOR.value:
+            # raise ValueError(f"Concept with id='{node}' is not a RELATOR")
+            self.logger.warning(f"Concept with id='{node}' is not a RELATOR")
+        else:  # cluster on relator
+            cluster_nodes = self._get_cluster_nodes(node)
+            other_nodes = self._entity_ids.keys() - cluster_nodes
+            for node in other_nodes:
+                self.delete_entity(node)
 
     def _get_cluster_nodes(self, relator: str) -> List[str]:
         """
