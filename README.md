@@ -1,4 +1,4 @@
-# ExpO Framework
+# ExpO: Towards Explaining Ontology-Driven Conceptual Models
 
 ## Expose: ExpO API Server
 An API service for performing transformation operations over Ontology Driven Conceptual Models.
@@ -82,4 +82,3 @@ Please, refer to the [PURL](https://purl.org/expo/expose) and
 cite the paper: 
 
 Romanenko, E., Calvanese, D., Guizzardi, G.: ExpO: Towards Explaining Ontology-Driven Conceptual Models. (2024) [DOI](https://doi.org/10.1007/978-3-031-59468-7_3)
-
