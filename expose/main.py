@@ -23,17 +23,17 @@ from expose.schema import ABSTRACTION_TYPE
 from expose.project.jsongraph import JSONGraph
 
 
-# TODO: remove comments before release
+# N.B. comment marked lines for debugging
 def setup_custom_logger(name, level=logging.INFO):
     formatter = logging.Formatter(fmt='%(levelname)-8s %(asctime)s %(message)s',
                                   datefmt='%Y-%m-%d %H:%M:%S')
-    # handler = logging.FileHandler(LOG_FILE_NAME, mode='w+')
-    # handler.setFormatter(formatter)
+    handler = logging.FileHandler(LOG_FILE_NAME, mode='w+')  #
+    handler.setFormatter(formatter)  #
     screen_handler = logging.StreamHandler(stream=sys.stdout)
     screen_handler.setFormatter(formatter)
     custom_logger = logging.getLogger(name)
     custom_logger.setLevel(level)
-    # custom_logger.addHandler(handler)
+    custom_logger.addHandler(handler)  #
     custom_logger.addHandler(screen_handler)
     return custom_logger
 
@@ -251,12 +251,11 @@ async def define(
                         if n >= len(meaning["definitions"]):
                             break
                         result["definition"].append(meaning["definitions"][n]["definition"])
-            return result
+
         except Exception:
             logger.error(f"No definition found for {concept}.")
-            return result
-    else:
-        return result
+
+    return result
 
 
 @app.put("/index")
@@ -314,7 +313,7 @@ def create_catalog_index() -> dict:
     for content in contents:
         logger.debug(f"Adding concepts from {content.path}, index size = {len(name_index)}.")
         graph_json = json.loads(content.decoded_content.decode())
-        graph_index = JSONGraph(graph_json, verbalize=False).get_index()
+        graph_index = JSONGraph(graph_json).get_index()
         for concept in graph_index:
             if concept not in name_index:
                 name_index[concept] = []
@@ -354,7 +353,7 @@ async def expand(data: ExpandModel):
         contents = get_git_contents(name_index[idx])
         for content in contents:
             graph_json = json.loads(content.decoded_content.decode())
-            graph_hierarchy_dict = JSONGraph(graph_json, verbalize=False).get_hierarchy(idx)
+            graph_hierarchy_dict = JSONGraph(graph_json).get_hierarchy(idx)
             left_nodes -= len(graph_hierarchy_dict["nodes"])
             graph.expand(data.node, graph_hierarchy_dict)
             if (data.limit > 0) and (left_nodes <= 0):
@@ -387,44 +386,35 @@ async def abstract(data: AbstractModel):
     Abstracts the given graph
     :param data: dict with abstraction type
     """
+
     data_checks(data)
-    for abs_type in data.abs_type:
-        if abs_type not in ABSTRACTION_TYPE:
-            raise HTTPException(status_code=400, detail=ERR_UNKNOWN_ABS)
+    if data.abs_type:  # for the case when we are iterating on abstractions
+        for abs_type in data.abs_type:
+            if abs_type not in ABSTRACTION_TYPE:
+                raise HTTPException(status_code=400, detail=ERR_UNKNOWN_ABS)
 
     # TODO: adapt the code to the TTLGraph
     try:
         graph = JSONGraph(data.origin) if data.in_format == "json" else TTLGraph(data.origin)
-        # write_to_stat_file(graph.to_row(), graph.name)
-        for abs_type in data.abs_type:
-            match abs_type:
-                case "parthood":
-                    graph.abstract_parthoods(data.long_names, data.mult_relations)
-                case "aspects":
-                    graph.abstract_aspects(data.long_names, data.mult_relations, data.keep_relators)
-                case "hierarchy":
-                    graph.abstract_hierarchies(data.long_names, data.mult_relations)
-            # write_to_stat_file(graph.to_row(), graph.name)
+        if data.abs_type:
+            for abs_type in data.abs_type:
+                match abs_type:
+                    case "parthood":
+                        graph.abstract_parthoods(data.long_names, data.mult_relations)
+                    case "hierarchy":
+                        graph.abstract_hierarchies(data.long_names, data.mult_relations)
+                    case "aspects":
+                        graph.abstract_aspects(data.long_names, data.mult_relations, data.keep_relators)
+        else:  # if no abstraction type is given, return next possible abstraction
+            try:
+                graph.next_abstraction(data.long_names, data.mult_relations, data.keep_relators)
+            except StopIteration:
+                logger.info("No more abstractions are possible.")
         return graph.to_expo(data.height, data.width) if data.out_format == "expo" else graph.to_json()
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-"""
-def write_to_stat_file(graph_stat: list, name: str, params: str = ""):
-    with open(STAT_FILE_NAME, 'a', newline='', encoding='utf-8') as f:
-        csv.writer(f).writerow([name, params] + graph_stat)
-"""
-
-
 if __name__ == "__main__":
-    """
-    if not os.path.exists(STAT_FILE_NAME):
-        with open(STAT_FILE_NAME, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(["name", "params", "number_of_classes", "number_of_all_relations",
-                             "number_of_part_of_relations", "number_of_generalizations"])
-    """
-
     uvicorn.run(app, port=API_PORT, host="0.0.0.0")

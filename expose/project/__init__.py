@@ -120,6 +120,12 @@ class RelationStereotype(Enum):
     BRINGS_ABOUT: Final[str] = "bringsAbout"
     TRIGGERS: Final[str] = "triggers"
 
+PART_OF_STEREOTYPES = [
+    RelationStereotype.MEMBER_OF.value,
+    RelationStereotype.SUBCOLLECTION_OF.value,
+    RelationStereotype.SUBQUANTITY_OF.value,
+    RelationStereotype.COMPONENT_OF.value
+]
 
 NON_SORTAL_STEREOTYPES = [
     ClassStereotype.CATEGORY.value,
@@ -163,6 +169,11 @@ ENDURANT_OR_DATATYPE = SORTAL_STEREOTYPES + \
 
 NOT_OBJECTS = ASPECTS + [ClassStereotype.EVENT.value]
 
+GS_STEREOTYPES = [
+    ClassStereotype.EVENT.value,
+    ClassStereotype.SUBKIND.value,
+    ClassStereotype.PHASE.value
+]
 
 """
 ------------------------------------------------------------

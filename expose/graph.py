@@ -103,6 +103,16 @@ class BaseGraph(ABC):
         pass
 
     @abstractmethod
+    def next_abstraction(self, long_names: bool, mult_relations: bool, keep_relators: bool):
+        """
+        Returns the next abstraction of the graph
+        :param long_names: whether to use long names with 's
+        :param mult_relations: whether to create multiple relations
+        :param keep_relators: whether to keep relators
+        """
+        pass
+
+    @abstractmethod
     def get_node_index(self, node: str):
         """
         Returns the index of the node in the graph
@@ -117,6 +127,14 @@ class BaseGraph(ABC):
         Returns the index of ALL nodes in the graph
         name + INDEX_DELIMITER + stereotype
         :param delimiter: delimiter for the index
+        """
+        pass
+
+    @abstractmethod
+    def get_rule(self) -> str:
+        """
+        Returns the rule with which the graph was generated
+        :param rule: name of the rule
         """
         pass
 
@@ -167,4 +185,10 @@ class TTLGraph(BaseGraph):
         raise NotImplementedError
 
     def abstract_parthoods(self, long_names: bool, mult_relations: bool):
+        raise NotImplementedError
+
+    def next_abstraction(self, long_names: bool, mult_relations: bool, keep_relators: bool):
+        raise NotImplementedError
+
+    def get_rule(self) -> str:
         raise NotImplementedError

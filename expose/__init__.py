@@ -9,7 +9,6 @@ General constants specified in .env
 API_PORT: Final[int] = int(config("API_PORT"))
 LOG_NAME: Final[str] = config("LOG_NAME")
 LOG_FILE_NAME: Final[str] = config("LOG_FILE_NAME")
-STAT_FILE_NAME: Final[str] = config("STAT_FILE_NAME")
 DEFINE_API_URL: Final[str] = config("DEFINE_API_URL")
 DEFINE_MAX_NUMBER: Final[int] = int(config("DEFINE_MAX_NUMBER"))
 EXPAND_MAX_NUMBER: Final[int] = int(config("EXPAND_MAX_NUMBER"))

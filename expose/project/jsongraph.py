@@ -12,11 +12,10 @@ from expose.project.view import View
 
 
 class JSONGraph(BaseGraph, Element):
-    def __init__(self, project: dict, verbalize: bool = True):
-        self._verbalize = verbalize
+    def __init__(self, project: dict):
         self.logger = logging.getLogger(LOG_NAME)
-        if self._verbalize:
-            self.logger.debug("Initialising graph of the model...")
+        self.logger.debug(f"Initialising graph of the model...{project['name']}...")
+        self._rule: str = ""
 
         Element.__init__(self, project)
         self._entities: dict[str, List[Entity]] = {}  # stereotype -> [Entity]
@@ -55,7 +54,6 @@ class JSONGraph(BaseGraph, Element):
                     d.elements = views  # save all those Views in the Diagram
                 self._diagrams[d.id] = d
 
-        # TODO: debug this part taking into account log messages
         for diagram in self._diagrams.values():
             for view in diagram.elements.values():
                 if view.type == RELATION_VIEW_TYPE:
@@ -69,9 +67,9 @@ class JSONGraph(BaseGraph, Element):
                     target_view = view.target["id"]
                     if not (source.has_view(source_view) and target.has_view(target_view)):
                         if source.has_view(target_view) and target.has_view(source_view):
-                            if self._verbalize:
-                                self.logger.warning(f"Inverted view of {relation.id} with stereotype {relation.stereotype}")
+                            self.logger.warning(f"Inverted view of {relation.id} with stereotype {relation.stereotype}")
                             view.invert()
+                            # relation.invert()  # TODO: check if it works on "participation"
                         else:
                             self.logger.error(f"Check inversion of relation {relation.id}")
 
@@ -85,6 +83,29 @@ class JSONGraph(BaseGraph, Element):
             self._stack.append(name)
             return True
         return False
+
+    def get_rule(self) -> str:
+        """
+        Returns the rule that was used for the last abstraction
+        :return: rule as a string
+        """
+        return self._rule
+
+    def set_rule(self, rule: str):
+        """
+        Attaches the rule that was used for the last abstraction
+        :param rule: rule as a string
+        """
+        if rule not in self._rule:
+            self._rule = rule if not self._rule else f"{self._rule}, {rule}"
+
+    def _continue_abstracting(self, next_only: bool) -> bool:
+        """
+        Checks if we should continue abstracting
+        :param next_only: flag to check if only the next step is needed
+        :return: True if we should continue
+        """
+        return (not next_only) or (not self._rule)
 
     """
     ------------------------------------------------------------
@@ -194,10 +215,11 @@ class JSONGraph(BaseGraph, Element):
 
                 # N.B.: invert part_of because of Visual Paradigm policy and plugin issues
                 if _type == PART_OF_TYPE and relation.is_aggregation_from():
-                    if self._verbalize:
+                        # if MEMBER_OF check is_aggregation_from with 1
+                        # if PART_OF check is_aggregation_from with 0
                         self.logger.warning(f"Invert PartOf relation {relation.id}")
-                    relation.invert()
-                    entity_from, entity_to = entity_to, entity_from
+                        relation.invert()
+                        entity_from, entity_to = entity_to, entity_from
 
             self._relations[_type].append(relation)
             self._relation_ids[relation.id] = relation
@@ -292,6 +314,7 @@ class JSONGraph(BaseGraph, Element):
         :return: dict with the Expo project
         """
         result = {
+            "rule": self.get_rule(),
             "graph": {"nodes": [], "links": []},
             "origin": self.to_json(),
             "constraints": []
@@ -337,14 +360,29 @@ class JSONGraph(BaseGraph, Element):
                     connections[link["source"]+link["target"]] = link
                 else:
                     connections[link["target"] + link["source"]]["name"] += " | " + link["name"]
-                    connections[link["target"] + link["source"]]["fullName"] += " | " + link["fullName"]
+                    if ("fullName" not in connections[link["target"] + link["source"]]) or \
+                            (not connections[link["target"] + link["source"]]["fullName"]):
+                        connections[link["target"] + link["source"]]["fullName"] = link["fullName"]
+                    else:
+                        connections[link["target"] + link["source"]]["fullName"] += " | " + link["fullName"]
                     if link["target"] + link["source"] not in double_links:
                         double_links[link["target"] + link["source"]] = link
                         double_links[link["target"] + link["source"]]["name"] = ""
                         double_links[link["target"] + link["source"]]["fullName"] = ""
             else:
-                connections[link["source"]+link["target"]]["name"] += " | " + link["name"]
-                connections[link["source"]+link["target"]]["fullName"] += " | " + link["fullName"]
+                if connections[link["source"]+link["target"]]["name"]:
+                    connections[link["source"]+link["target"]]["name"] += " | " + link["name"]
+                else:
+                    connections[link["source"]+link["target"]]["name"] = link["name"]
+                # TODO: check why fullName is not always present
+                if ("fullName" not in link) or (not link["fullName"]):
+                    link["fullName"] = link["name"]
+                if ("fullName" not in connections[link["source"]+link["target"]]) or \
+                        (not connections[link["source"]+link["target"]]["fullName"]):
+                    connections[link["source"]+link["target"]]["fullName"] = link["fullName"]
+                else:
+                    connections[link["source"] + link["target"]]["fullName"] += " | " + link["fullName"]
+
         return list(connections.values()) + list(double_links.values())
 
     def __str__(self):
@@ -480,11 +518,13 @@ class JSONGraph(BaseGraph, Element):
         self._relation_ids[relation_id].add_view(relation_view)
         self._diagrams[diagram_id].add_element(relation_view)
 
-    def _create_enumeration_and_relation(self, source: Entity, literals: List, name: str, diagram_id: str):
+    def _create_enumeration_and_relation(self, source: Entity, literals: List,
+                                         complete_disjoint: bool, name: str, diagram_id: str):
         """
         Creates enumeration and corresponding relation, adds all to the diagram
         :param source: Entity that is source for the generalization set
         :param literals: List of literals to be added to Enumeration
+        :param complete_disjoint: flag if enumeration is mandatory
         :param name: Name of Enumeration
         :param diagram_id: id of the diagram to which the elements are added
         """
@@ -502,8 +542,9 @@ class JSONGraph(BaseGraph, Element):
         self._entity_ids[enumeration_id].add_view(enumeration_view)
         self._diagrams[diagram_id].add_element(enumeration_view)
 
+        cardinality_to = "1" if complete_disjoint else "*"
         self._create_relation(source, target, source.get_view(diagram_id), enumeration_view,
-                              diagram_id, cardinality_to="1")
+                              diagram_id, cardinality_to=cardinality_to)
 
     def _clear_abstracted_entities(self):
         """
@@ -516,7 +557,7 @@ class JSONGraph(BaseGraph, Element):
 
     """
     ------------------------------------------------------------
-    Operators functions: cluster, focus
+    Operators functions: cluster, focus, fold
     ------------------------------------------------------------
     """
 
@@ -644,6 +685,55 @@ class JSONGraph(BaseGraph, Element):
                         nodes.append(self._relation_ids[edge].from_entity.id)
                 idx += 1
         return nodes
+
+    def fold_entity(self, entity: Entity, next_only: bool, long_names: bool, mult_relations: bool, part_of_only: bool = False):
+        """
+        Collapses all parthoods and hierarchies to the Entity itself
+        N.B. Recursive function
+        :param entity: Entity that should be folded
+        :param next_only: apply only one rule of abstraction
+        :param long_names: modify names with 's
+        :param mult_relations: create multiple relations between Entities
+        :param part_of_only: if True, then only part_of relations are folded
+        """
+        self.logger.info(f"Folding {entity.name}")
+        if self._add_to_stack(entity.name):
+
+            # abstract parthood
+            idx = 0
+            while self._continue_abstracting(next_only) and (idx < len(entity.in_edges[PART_OF_TYPE])):
+                _id = entity.in_edges[PART_OF_TYPE][idx]
+                if _id in self._relation_ids:
+                    relation = self._relation_ids[_id]
+                    if relation.stereotype != RelationStereotype.MEMBER_OF.value:
+                        self.abstract_parthood(relation, next_only, long_names, mult_relations)
+                    else:
+                        idx += 1
+                else:
+                    idx += 1
+
+            # hierarchy abstraction
+            if not part_of_only:
+                # get all from NON_SORTALS
+                for out_id in copy.copy(entity.out_edges[GENERAL_TYPE]):
+                    if self._continue_abstracting(next_only):
+                        if out_id in self._relation_ids:
+                            out_relation = self._relation_ids[out_id]
+                            if out_relation.to_entity.stereotype in NON_SORTAL_STEREOTYPES:
+                                self.abstract_hierarchy(out_relation, next_only, long_names, mult_relations)
+                # get all from lower levels
+                while self._continue_abstracting(next_only) and entity.in_edges[GENERAL_TYPE]:
+                    _id = entity.in_edges[GENERAL_TYPE][0]
+                    self.abstract_hierarchy(self._relation_ids[_id], next_only, long_names, mult_relations)
+
+            self._clear_abstracted_entities()
+            self._stack.pop(-1)
+
+    def fold(self, node: str, long_names: bool, mult_relations: bool):
+        """
+        Implements folding functionality for the given node id
+        """
+        self.fold_entity(self._entity_ids[node], False, long_names, mult_relations)
 
     """
     ------------------------------------------------------------
@@ -940,34 +1030,51 @@ class JSONGraph(BaseGraph, Element):
                 existing_relation.set_minimal_cardinality_from(relation.get_cardinality_from())
                 existing_relation.set_minimal_cardinality_to(relation.get_cardinality_to())
 
-    def _abstract_generalization(self, generalization: Generalization, long_names: bool, mult_relations: bool):
+    """
+    ------------------------------------------------------------
+    Abstracting hierarchies
+    ------------------------------------------------------------
+    """
+
+    def _abstract_generalization(self, generalization: Generalization, next_only: bool, long_names: bool, mult_relations: bool):
         """
         Additional function that moves all relations from the specific entity upwards
+        :param generalization: Generalization that should be abstracted
+        :param next_only: apply only one rule of abstraction
+        :param long_names: create names with 's
+        :param mult_relations: create several relations between the same Entities
         """
         general_entity = generalization.to_entity
         specific_entity = generalization.from_entity
         self.logger.info(f"Abstracting generalization from {specific_entity.name} to {general_entity.name}")
-        self.fold_entity(specific_entity, long_names, mult_relations)
+        self.fold_entity(specific_entity, next_only, long_names, mult_relations)
 
-        for in_id in copy.copy(specific_entity.in_edges[RELATION_TYPE] + specific_entity.in_edges[PART_OF_TYPE]):
-            role = None if self._relation_ids[in_id].role_to else specific_entity.name
-            self._move_relation(False, mult_relations, self._relation_ids[in_id], general_entity, new_role=role)
-        for out_id in copy.copy(specific_entity.out_edges[RELATION_TYPE] + specific_entity.out_edges[PART_OF_TYPE]):
-            role = None if self._relation_ids[out_id].role_from else specific_entity.name
-            self._move_relation(True, mult_relations, self._relation_ids[out_id], general_entity, new_role=role)
+        if self._continue_abstracting(next_only):
+            for in_id in copy.copy(specific_entity.in_edges[RELATION_TYPE] + specific_entity.in_edges[PART_OF_TYPE]):
+                role = None if self._relation_ids[in_id].role_to else specific_entity.name
+                self._move_relation(False, mult_relations, self._relation_ids[in_id], general_entity, new_role=role)
+            for out_id in copy.copy(specific_entity.out_edges[RELATION_TYPE] + specific_entity.out_edges[PART_OF_TYPE]):
+                role = None if self._relation_ids[out_id].role_from else specific_entity.name
+                self._move_relation(True, mult_relations, self._relation_ids[out_id], general_entity, new_role=role)
 
-        # remove other entity only if there is no other up-going links
-        if specific_entity.has_other_up_edges():
-            self.delete_relation(generalization.id)
-            if general_entity.stereotype not in NON_SORTAL_STEREOTYPES:
-                self._ids_to_be_abstracted.append(specific_entity.id)
-        else:
-            self.delete_entity(specific_entity.id)
+            # remove other entity only if there is no other up-going links
+            if specific_entity.has_other_up_edges():
+                self.delete_relation(generalization.id)
+                if general_entity.stereotype not in NON_SORTAL_STEREOTYPES:
+                    self._ids_to_be_abstracted.append(specific_entity.id)
+            else:
+                self.delete_entity(specific_entity.id)
 
-    def _process_generalization_set(self, gs: GeneralizationSet, long_names: bool, mult_relations: bool):
+            if general_entity.stereotype in SORTAL_STEREOTYPES:
+                self.set_rule("H2")
+            else:
+                self.set_rule("H4")
+
+    def _process_generalization_set(self, gs: GeneralizationSet, next_only: bool, long_names: bool, mult_relations: bool):
         """
         Process GeneralizationSet abstraction if found
         :param gs: GeneralizationSet object
+        :param next_only: apply only one rule of abstraction
         :param long_names: create names with 's
         :param mult_relations: create several relations between the same Entities
         """
@@ -978,57 +1085,72 @@ class JSONGraph(BaseGraph, Element):
         gs_name = gs.name
         self.logger.info(f"Process generalization set to {source.name}")
 
-        for generalization in copy.copy(gs.generalizations):
-            literals.append(generalization.from_entity.name)
-            self._abstract_generalization(generalization, long_names, mult_relations)
+        local_gs = copy.copy(gs.generalizations)
+        for generalization in local_gs:
+            if self._continue_abstracting(next_only):
+                self.fold_entity(generalization.from_entity, next_only, long_names, mult_relations)
 
-        if complete_disjoint:
-            literals_obj = [Literal(literal).to_json() for literal in literals]
+        if self._continue_abstracting(next_only):  # all specific entities are folded
+            for generalization in local_gs:
+                if generalization.from_entity.stereotype in GS_STEREOTYPES:
+                    literals.append(generalization.from_entity.name)
+                self._abstract_generalization(generalization, False, long_names, mult_relations)  # folded before
 
-            # check if there is already enumeration
-            for _id in copy.copy(source.get_out_edges()):
-                candidate_entity = self._relation_ids[_id].to_entity
-                if candidate_entity.stereotype == ClassStereotype.ENUMERATION.value:
-                    literals_obj += candidate_entity.rest["literals"]
-                    if len(candidate_entity.get_out_edges()) + len(candidate_entity.get_in_edges()) > 1:
-                        self.delete_relation(_id)
-                    else:
-                        self.delete_entity(candidate_entity.id)
-            # create enumeration and relation to it
-            self._create_enumeration_and_relation(source, literals_obj, gs_name, diagram_id)
+            if literals:
+                literals_obj = [Literal(literal).to_json() for literal in literals]
 
-    def abstract_hierarchy(self, generalization: Generalization, long_names: bool, mult_relations: bool):
+                # check if there is already enumeration
+                for _id in copy.copy(source.get_out_edges()):
+                    candidate_entity = self._relation_ids[_id].to_entity
+                    if candidate_entity.stereotype == ClassStereotype.ENUMERATION.value:
+                        literals_obj += candidate_entity.rest["literals"]
+                        if len(candidate_entity.get_out_edges()) + len(candidate_entity.get_in_edges()) > 1:
+                            self.delete_relation(_id)
+                        else:
+                            self.delete_entity(candidate_entity.id)
+                # create enumeration and relation to it
+                self._create_enumeration_and_relation(source, literals_obj, complete_disjoint, gs_name, diagram_id)
+
+                if source.stereotype in SORTAL_STEREOTYPES:
+                    self.set_rule("H3")
+                else:
+                    self.set_rule("H5")
+
+    def abstract_hierarchy(self, generalization: Generalization, next_only: bool, long_names: bool, mult_relations: bool):
         """
         Abstract Generalization relation
         :param generalization: Generalization that should be abstracted
+        :param next_only: apply only one rule of abstraction
         :param long_names: create names with 's
         :param mult_relations: create several relations between the same Entities
         """
         general_entity = generalization.to_entity
 
-        if general_entity.stereotype in NON_SORTAL_STEREOTYPES:  # R2 implementation
+        if general_entity.stereotype in NON_SORTAL_STEREOTYPES:  # H1 implementation
             self.logger.info(f"Pushing all relations from {general_entity.name} down")
-            self.fold_entity(general_entity, long_names, mult_relations, part_of_only=True)
+            self.fold_entity(general_entity, next_only, long_names, mult_relations, part_of_only=True)
 
-            # all specific entities that should receive new relations
-            specific_entities = [self._relation_ids[_id].from_entity for _id in general_entity.in_edges[GENERAL_TYPE]]
-            new_role = general_entity.name
-            for in_id in general_entity.in_edges[RELATION_TYPE]:
-                relation = self._relation_ids[in_id]
-                for entity in specific_entities:
-                    self._move_relation(False, mult_relations, relation, entity, new_role=new_role)
-            for out_id in general_entity.out_edges[RELATION_TYPE]:
-                relation = self._relation_ids[out_id]
-                for entity in specific_entities:
-                    self._move_relation(True, mult_relations, relation, entity, new_role=new_role)
-            self.delete_entity(general_entity.id)
+            if self._continue_abstracting(next_only):
+                # all specific entities that should receive new relations
+                specific_entities = [self._relation_ids[_id].from_entity for _id in general_entity.in_edges[GENERAL_TYPE]]
+                new_role = general_entity.name
+                for in_id in general_entity.in_edges[RELATION_TYPE]:
+                    relation = self._relation_ids[in_id]
+                    for entity in specific_entities:
+                        self._move_relation(False, mult_relations, relation, entity, new_role=new_role)
+                for out_id in general_entity.out_edges[RELATION_TYPE]:
+                    relation = self._relation_ids[out_id]
+                    for entity in specific_entities:
+                        self._move_relation(True, mult_relations, relation, entity, new_role=new_role)
+                self.delete_entity(general_entity.id)
+                self.set_rule("H1")
 
         else:  # need to go upwards
-            if generalization.set:  # R4-H5
+            if generalization.set:  # H3-H5
                 self._process_generalization_set(self._generalization_set_ids[generalization.set],
-                                                 long_names, mult_relations)
-            else:  # R3-H4
-                self._abstract_generalization(generalization, long_names, mult_relations)
+                                                 next_only, long_names, mult_relations)
+            else:  # H2-H4
+                self._abstract_generalization(generalization, next_only, long_names, mult_relations)
 
     def abstract_hierarchies(self, long_names: bool, mult_relations: bool):
         """
@@ -1036,13 +1158,20 @@ class JSONGraph(BaseGraph, Element):
         """
         self.logger.debug("Abstracting all hierarchies")
         while self._relations[GENERAL_TYPE]:
-            self.abstract_hierarchy(self._relations[GENERAL_TYPE][0], long_names, mult_relations)
+            self.abstract_hierarchy(self._relations[GENERAL_TYPE][0], False, long_names, mult_relations)
         self._clear_abstracted_entities()
 
-    def abstract_parthood(self, relation: Relation, long_names: bool, mult_relations: bool):
+    """
+    ------------------------------------------------------------
+    Abstracting parts
+    ------------------------------------------------------------
+    """
+
+    def abstract_parthood(self, relation: Relation, next_only: bool, long_names: bool, mult_relations: bool):
         """
         Abstract given parthood relation
         :param relation: Relation to be abstracted
+        :param next_only: apply only one rule of abstraction
         :param long_names: modify names with 's
         :param mult_relations: create multiple relations between Entities
         """
@@ -1051,57 +1180,80 @@ class JSONGraph(BaseGraph, Element):
         if whole_entity.id == part_entity.id:
             self.logger.error(ERR_RECURSION + part_entity.name)
             self.delete_relation(relation.id)
+            self.logger.info(f"Abstracting recursive relation of {whole_entity.name}")
+            self.set_rule("P1")
             return
 
-        self.logger.info(f"Abstracting part_of from {part_entity.name} to {whole_entity.name}")
-        role_name = part_entity.name
-        self.fold_entity(part_entity, long_names, mult_relations)
-        # In case of recursion previous line could lead to deletion of whole_entity
-        if whole_entity.id not in self._entity_ids:
-            self.logger.error(ERR_RECURSION + f"{part_entity.name}, {whole_entity.name}")
-            if relation.id in self._relation_ids:
-                self.delete_relation(relation.id)
-            return
+        role_name = part_entity.name  # should be here in case of further changes
+        self.fold_entity(part_entity, next_only, long_names, mult_relations)
+        # could be that another rule was applied in fold
+        if self._continue_abstracting(next_only):
+            # TODO: check how the whole entity is deleted
+            # in case of recursion fold could lead to deletion of whole_entity
+            if whole_entity.id not in self._entity_ids:
+                self.logger.error(ERR_RECURSION + f"{part_entity.name}, {whole_entity.name}")
+                if relation.id in self._relation_ids:
+                    self.delete_relation(relation.id)
+                    self.logger.info(f"Abstracting recursion between {part_entity.name} and {whole_entity.name}")
+                    self.set_rule("P1")
+                return
 
-        new_name = ""
-
-        if relation.stereotype == RelationStereotype.COMPONENT_OF.value:
-            role_name = None  # no roles if componentOf
-            whole_entity.add_attribute(part_entity.name)  # add part_entity as attribute
-            if long_names:
-                new_name = f"{whole_entity.name}'s {part_entity.name} "
-
-        # move all relations from part-entity to this whole-entity
-        for in_id in part_entity.in_edges[RELATION_TYPE]:
-            candidate_relation = self._relation_ids[in_id]
-            if candidate_relation.stereotype != RelationStereotype.TERMINATION.value or \
-                    relation.is_essential():
-                if (not long_names) or (candidate_relation.from_entity.stereotype in NOT_OBJECTS):
-                    name = candidate_relation.name
-                else:
-                    name = new_name + candidate_relation.name if candidate_relation.name else new_name
-                self._move_relation(False, mult_relations, candidate_relation, whole_entity, name, role_name)
-                self._relation_ids[in_id].rest["properties"][1]["cardinality"] = "1"
-
-        for out_id in part_entity.out_edges[RELATION_TYPE]:
-            candidate_relation = self._relation_ids[out_id]
-            if (not long_names) or (candidate_relation.from_entity.stereotype in NOT_OBJECTS):
-                name = candidate_relation.name
+            new_name = ""
+            self.logger.info(f"Abstracting part_of from {part_entity.name} to {whole_entity.name}")
+            if relation.stereotype == RelationStereotype.COMPONENT_OF.value:
+                role_name = None  # no roles if componentOf
+                whole_entity.add_attribute(part_entity.name)  # add part_entity as attribute
+                if long_names:
+                    new_name = f"{whole_entity.name}'s {part_entity.name} "
             else:
-                name = new_name + candidate_relation.name if candidate_relation.name else new_name
-            self._move_relation(True, mult_relations, candidate_relation, whole_entity, name, role_name)
-            self._relation_ids[out_id].rest["properties"][0]["cardinality"] = "1"
+                self.set_rule("P1")
 
-        for in_id in part_entity.in_edges[PART_OF_TYPE]:
-            candidate_relation = self._relation_ids[in_id]
-            if candidate_relation.stereotype == RelationStereotype.MEMBER_OF.value:
-                self._move_relation(False, mult_relations, candidate_relation, whole_entity)
+            # move all relations from part-entity to this whole-entity
+            for in_id in part_entity.in_edges[RELATION_TYPE]:
+                candidate_relation = self._relation_ids[in_id]
+                if candidate_relation.stereotype != RelationStereotype.TERMINATION.value or \
+                        relation.is_essential():
+                    if (not long_names) or (candidate_relation.from_entity.stereotype in NOT_OBJECTS):
+                        name = candidate_relation.name
+                    else:
+                        name = new_name + candidate_relation.name if candidate_relation.name else new_name
+                    self._move_relation(False, mult_relations, candidate_relation, whole_entity, name, role_name)
+                    self._relation_ids[in_id].rest["properties"][1]["cardinality"] = "1"
 
-        # remove other entity only if there is no other up-going links
-        if part_entity.has_other_up_edges():
-            self.delete_relation(relation.id)
-        else:
-            self.delete_entity(part_entity.id)
+                    if candidate_relation.from_entity.stereotype == ClassStereotype.EVENT.value:
+                        self.set_rule("P4")
+                    elif candidate_relation.from_entity.stereotype in ASPECTS:
+                        self.set_rule("P3")
+                    else:
+                        self.set_rule("P2")
+
+            for out_id in part_entity.out_edges[RELATION_TYPE]:
+                if out_id != relation.id:
+                    candidate_relation = self._relation_ids[out_id]
+                    if (not long_names) or (candidate_relation.to_entity.stereotype in NOT_OBJECTS):  # was from_entity
+                        name = candidate_relation.name
+                    else:
+                        name = new_name + candidate_relation.name if candidate_relation.name else new_name
+                    self._move_relation(True, mult_relations, candidate_relation, whole_entity, name, role_name)
+                    self._relation_ids[out_id].rest["properties"][0]["cardinality"] = "1"
+
+                    if candidate_relation.from_entity.stereotype == ClassStereotype.EVENT.value:
+                        self.set_rule("P4")
+                    elif candidate_relation.from_entity.stereotype in ASPECTS:
+                        self.set_rule("P3")
+                    else:
+                        self.set_rule("P2")
+
+            for in_id in part_entity.in_edges[PART_OF_TYPE]:
+                candidate_relation = self._relation_ids[in_id]
+                if candidate_relation.stereotype == RelationStereotype.MEMBER_OF.value:
+                    self._move_relation(False, mult_relations, candidate_relation, whole_entity)
+
+            # remove other entity only if there is no other up-going links
+            if part_entity.has_other_up_edges():
+                self.delete_relation(relation.id)
+            else:
+                self.delete_entity(part_entity.id)
 
     def abstract_parthoods(self, long_names: bool, mult_relations: bool):
         """
@@ -1112,22 +1264,28 @@ class JSONGraph(BaseGraph, Element):
         while idx < len(self._relations[PART_OF_TYPE]):
             relation = self._relations[PART_OF_TYPE][idx]
             if relation.stereotype != RelationStereotype.MEMBER_OF.value:
-                self.abstract_parthood(relation, long_names, mult_relations)
+                self.abstract_parthood(relation, False, long_names, mult_relations)
             else:
                 idx += 1
 
-    def _get_aspect_stocks(self, entity: Entity) -> (List, List):
+    """
+    ------------------------------------------------------------
+    Abstracting aspects
+    ------------------------------------------------------------
+    """
+
+    def _get_aspect_sinks(self, entity: Entity) -> (List, List):
         """
         Calculates all upper level concepts and incoming relations that should be moved
         :param entity: Entity that represent an Aspect
         :returns: List of stocks, in_relations
         """
-        stocks, in_relations = [], []
+        sinks, in_relations = [], []
 
         # determine lists of to-entities
         for _id in entity.out_edges[GENERAL_TYPE]:
             out_relation = self._relation_ids[_id]
-            stocks.append(out_relation.to_entity)
+            sinks.append(out_relation.to_entity)
 
         # determine incoming relations that should be moved up
         for _id in entity.in_edges[RELATION_TYPE]:
@@ -1135,7 +1293,7 @@ class JSONGraph(BaseGraph, Element):
             if in_relation.from_entity.stereotype in ENDURANT_OR_DATATYPE:
                 in_relations.append(in_relation)
 
-        return stocks, in_relations
+        return sinks, in_relations
 
     def _get_aspect_sources(self, entity: Entity) -> (List, List):
         """
@@ -1170,78 +1328,93 @@ class JSONGraph(BaseGraph, Element):
             in_relation = self._relation_ids[_id]
             if in_relation.stereotype == RelationStereotype.MANIFESTATION.value and \
                     in_relation.from_entity.stereotype == ClassStereotype.EVENT.value:
-                events.append((in_relation.from_entity, in_relation))
+                events.append(in_relation.from_entity)
+                relations.append(in_relation)
 
         return events, relations
 
-    def abstract_aspect(self, entity: Entity, long_names: bool, mult_relations: bool, keep_relators: bool):
+    def abstract_aspect(self, entity: Entity, next_only: bool, long_names: bool, mult_relations: bool, keep_relators: bool):
         """
         Abstract the given aspect entity.
         N.B. Recursive function for processing chains of externally dependent aspects
         :param entity: Entity that represent an Aspect
+        :param next_only: apply only one rule of abstraction
         :param long_names: modify names with 's
         :param mult_relations: create multiple relations between Entities
         :param keep_relators: keep relators with more than MIN_RELATORS_DEGREE relations
         """
-        self.logger.info(f"Abstracting {entity.name}")
-        # if we need to abstract this Aspect according to the given parameters
-        if (not keep_relators) or (entity.get_number_of_edges() < MIN_RELATORS_DEGREE):
+        if self._continue_abstracting(next_only):
+            # if we have a relator but keep_relators is False, we abstract it
+            # if we have a relator with more than MIN_RELATORS_DEGREE relations, we keep it
+            # we also abstract all other aspects
+            if (entity.stereotype != ClassStereotype.RELATOR.value) or (not keep_relators) or \
+                    (entity.get_number_of_edges() < MIN_RELATORS_DEGREE):
+                self.fold_entity(entity, next_only, long_names, mult_relations)
+                # could be that here another rule was applied in fold
+                # if not, then check if we have a chain of aspects
+                if self._continue_abstracting(next_only):
+                    for _id in entity.in_edges[RELATION_TYPE]:
+                        in_relation = self._relation_ids[_id]
+                        if (in_relation.from_entity.stereotype in ASPECTS) and (in_relation.from_entity.id != entity.id):
+                            # there is a chain of aspects: recursive call
+                            # but make sure it's not the same entity
+                            self.abstract_aspect(in_relation.from_entity, next_only,
+                                                 long_names, mult_relations, keep_relators)
 
-            self.fold_entity(entity, long_names, mult_relations)
-            for _id in entity.in_edges[RELATION_TYPE]:
-                in_relation = self._relation_ids[_id]
-                if in_relation.from_entity.stereotype in ASPECTS:
-                    # There is a chain of aspects: recursive call
-                    self.abstract_aspect(in_relation.from_entity, long_names, mult_relations, keep_relators)
+                    if self._continue_abstracting(next_only):
+                        sinks, in_relations = self._get_aspect_sinks(entity)
+                        sources, out_relations = self._get_aspect_sources(entity)
+                        events, relations = self._get_aspect_participations(entity)
 
-            stocks, in_relations = self._get_aspect_stocks(entity)
-            sources, out_relations = self._get_aspect_sources(entity)
-            events, relations = self._get_aspect_participations(entity)
+                        # move all incoming to the upper level of hierarchy
+                        for in_relation in in_relations:
+                            for sink in sinks:
+                                if not self._check_for_existence_by_prototype(mult_relations, in_relation, to_entity=sink):
+                                    new_id = self.create_relation_from_existing(in_relation, new_to=sink, role_to=entity.name)
+                                    self._relation_ids[new_id].relax_cardinality_to()
 
-            # Move all incoming to the upper level of hierarchy
-            for in_relation in in_relations:
-                for stock in stocks:
-                    if not self._check_for_existence_by_prototype(mult_relations, in_relation, to_entity=stock):
-                        new_id = self.create_relation_from_existing(in_relation, new_to=stock, role_to=entity.name)
-                        self._relation_ids[new_id].relax_cardinality_to()
+                        if out_relations:
+                            self.set_rule("A1")
+                        # A1
+                        for out_relation in out_relations:
+                            for source in sources:
+                                if not long_names:
+                                    name = out_relation.name if out_relation.name else entity.name
+                                else:
+                                    name = f"{source.name}'s {out_relation.role_from if out_relation.role_from else entity.name}"
+                                    if out_relation.name:
+                                        name += f" {out_relation.name}"
+                                if not self._check_for_existence_by_prototype(mult_relations, out_relation, from_entity=source):
+                                    new_id = self.create_relation_from_existing(out_relation, new_from=source,
+                                                                                role_from="", new_name=name)
+                                    self._relation_ids[new_id].relax_cardinality_to()
+                                    self._relation_ids[new_id].rest["properties"][0]["cardinality"] = None
 
-            # A1
-            for out_relation in out_relations:
-                for source in sources:
-                    if not long_names:
-                        name = out_relation.name if out_relation.name else entity.name
-                    else:
-                        name = f"{source.name}'s {out_relation.role_from if out_relation.role_from else entity.name}"
-                        if out_relation.name:
-                            name += f" {out_relation.name}"
-                    if not self._check_for_existence_by_prototype(mult_relations, out_relation, from_entity=source):
-                        new_id = self.create_relation_from_existing(out_relation, new_from=source,
-                                                                    role_from="", new_name=name)
-                        self._relation_ids[new_id].relax_cardinality_to()
-                        self._relation_ids[new_id].rest["properties"][0]["cardinality"] = None
+                        # create relations between sources (see A1) if there was no any
+                        for i in range(0, len(sources) - 1):
+                            for j in range(i+1, len(sources)):
+                                diagram_ids = sources[i].get_all_diagrams().intersection(sources[j].get_all_diagrams())
+                                if not self._check_for_relation_existence(mult_relations, sources[i],
+                                                                          sources[j], relation_name=entity.name):
+                                    for diagram_id in diagram_ids:
+                                        self._create_relation(sources[i], sources[j], sources[i].get_view(diagram_id),
+                                                              sources[j].get_view(diagram_id), diagram_id, name=entity.name)
 
-            # Create relations between sources (see A1) if there was no any
-            for i in range(0, len(sources) - 1):
-                for j in range(i+1, len(sources)):
-                    diagram_ids = sources[i].get_all_diagrams().intersection(sources[j].get_all_diagrams())
-                    if not self._check_for_relation_existence(mult_relations, sources[i],
-                                                              sources[j], relation_name=entity.name):
-                        for diagram_id in diagram_ids:
-                            self._create_relation(sources[i], sources[j], sources[i].get_view(diagram_id),
-                                                  sources[j].get_view(diagram_id), diagram_id, name=entity.name)
+                        if events:
+                            self.set_rule("A2")
+                        # A2
+                        for event, relation in zip(events, relations):
+                            for source in sources:
+                                relation.stereotype = RelationStereotype.PARTICIPATION.value
+                                if not self._check_for_existence_by_prototype(mult_relations, relation,
+                                                                              from_entity=source, to_entity=event):
+                                    new_id = self.create_relation_from_existing(relation, new_from=source, new_to=event,
+                                                                                role_from="", role_to="")
+                                    self._relation_ids[new_id].rest["properties"][1]["cardinality"] = "1"
+                                    self._relation_ids[new_id].rest["properties"][0]["cardinality"] = None
 
-            # A2
-            for event, relation in zip(events, relations):
-                for source in sources:
-                    relation.stereotype = RelationStereotype.PARTICIPATION.value
-                    if not self._check_for_existence_by_prototype(mult_relations, relation,
-                                                                  from_entity=source, to_entity=event):
-                        new_id = self.create_relation_from_existing(relation, new_from=source, new_to=event,
-                                                                    role_from="", role_to="")
-                        self._relation_ids[new_id].rest["properties"][1]["cardinality"] = "1"
-                        self._relation_ids[new_id].rest["properties"][0]["cardinality"] = None
-
-            self.delete_entity(entity.id)
+                        self.logger.info(f"Abstracting {entity.name}")
+                        self.delete_entity(entity.id)
 
     def abstract_aspects(self, long_names: bool, mult_relations: bool, keep_relators: bool):
         """
@@ -1251,48 +1424,51 @@ class JSONGraph(BaseGraph, Element):
         for aspect in ASPECTS:
             if aspect in self._entities:
                 for aspect_entity in copy.copy(self._entities[aspect]):
-                    self.abstract_aspect(aspect_entity, long_names, mult_relations, keep_relators)
+                    self.abstract_aspect(aspect_entity, False, long_names, mult_relations, keep_relators)
 
-    def fold_entity(self, entity: Entity, long_names: bool, mult_relations: bool, part_of_only: bool = False):
+    """
+    ------------------------------------------------------------
+    Iterator functions
+    ------------------------------------------------------------
+    """
+
+    def next_abstraction(self, long_names: bool, mult_relations: bool, keep_relators: bool):
         """
-        Collapses all parthoods and hierarchies to the Entity itself
-        N.B. Recursive function
-        :param entity: Entity that should be folded
+        Returns the next abstraction of the graph
+        N.B. Raises StopIteration if no more abstractions are possible
         :param long_names: modify names with 's
         :param mult_relations: create multiple relations between Entities
-        :param part_of_only: if True, then only part_of relations are folded
+        :param keep_relators: keep relators with more than MIN_RELATORS_DEGREE relations
         """
-        self.logger.info(f"Folding {entity.name}")
-        if self._add_to_stack(entity.name):
+        self._rule = ""
 
-            # abstract parthood
-            idx = 0
-            while idx < len(entity.in_edges[PART_OF_TYPE]):
-                _id = entity.in_edges[PART_OF_TYPE][idx]
-                relation = self._relation_ids[_id]
-                if relation.stereotype != RelationStereotype.MEMBER_OF.value:
-                    self.abstract_parthood(relation, long_names, mult_relations)
-                else:
-                    idx += 1
+        # abstract parthood
+        self.logger.debug("Check if there are any parthood relations to abstract")
+        # idx is used because MEMBER_OF relations should be kept
+        idx = 0
+        while (self._continue_abstracting(True)) and (idx < len(self._relations[PART_OF_TYPE])):
+            relation = self._relations[PART_OF_TYPE][idx]
+            if relation.stereotype != RelationStereotype.MEMBER_OF.value:
+                self.abstract_parthood(relation, True, long_names, mult_relations)
+            else:
+                idx += 1
+        if self._rule:  # fast exit
+            return self
 
-            # hierarchy abstraction
-            if not part_of_only:
-                # get all from NON_SORTALS
-                for out_id in copy.copy(entity.out_edges[GENERAL_TYPE]):
-                    if out_id in self._relation_ids:
-                        out_relation = self._relation_ids[out_id]
-                        if out_relation.to_entity.stereotype in NON_SORTAL_STEREOTYPES:
-                            self.abstract_hierarchy(out_relation, long_names, mult_relations)
-                # get all from lower levels
-                while entity.in_edges[GENERAL_TYPE]:
-                    _id = entity.in_edges[GENERAL_TYPE][0]
-                    self.abstract_hierarchy(self._relation_ids[_id], long_names, mult_relations)
-
+        # abstract hierarchy
+        self.logger.debug("Check if there are any hierarchies to abstract")
+        if self._continue_abstracting(True) and self._relations[GENERAL_TYPE]:
+            self.abstract_hierarchy(self._relations[GENERAL_TYPE][0], True, long_names, mult_relations)
             self._clear_abstracted_entities()
-            self._stack.pop(-1)
+        if self._rule:  # fast exit
+            return self
 
-    def fold(self, node: str, long_names: bool, mult_relations: bool):
-        """
-        Implements folding functionality for the given node id
-        """
-        self.fold_entity(self._entity_ids[node], long_names, mult_relations)
+        # abstract aspects
+        self.logger.debug("Check if there are any aspects to abstract")
+        for aspect in ASPECTS:
+            if self._continue_abstracting(True) and (aspect in self._entities) and self._entities[aspect]:
+                self.abstract_aspect(self._entities[aspect][0], True, long_names, mult_relations, keep_relators)
+        if self._rule:
+            return self
+        else:
+            raise StopIteration

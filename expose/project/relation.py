@@ -457,6 +457,8 @@ class Relation(AbcRelation):
         self._from, self._to = self._to, self._from
         self.rest["properties"][0], self.rest["properties"][1] = \
             self.rest["properties"][1], self.rest["properties"][0]
+        self.rest["properties"][0]["aggregationKind"], self.rest["properties"][1]["aggregationKind"] = \
+            self.rest["properties"][1]["aggregationKind"], self.rest["properties"][0]["aggregationKind"]
 
     def is_aggregation_from(self):
         """
@@ -464,5 +466,8 @@ class Relation(AbcRelation):
         N.B. This function is needed only because of the issue with
         inversion of PartOf Relations
         """
-        return self.rest["properties"][0]["aggregationKind"] and (
-                self.rest["properties"][0]["aggregationKind"] != "NONE")
+        return ((self.stereotype in PART_OF_STEREOTYPES) and
+                 self.rest["properties"][1]["aggregationKind"] and
+                (self.rest["properties"][1]["aggregationKind"] != "NONE")) or \
+                (self.rest["properties"][0]["aggregationKind"] and
+                (self.rest["properties"][0]["aggregationKind"] != "NONE"))

@@ -153,7 +153,7 @@ class Entity(Element):
             "isPowertype": None,
             "order": None,
             "literals": literals,
-            "restrictedTo": [ClassStereotype.ABSTRACT]
+            "restrictedTo": [ClassStereotype.ABSTRACT.value]
         }
 
     @staticmethod
